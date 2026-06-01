@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>アナグラム検索ツール</title>
+    <style>
+        body {
+            font-family: "Hiragino Kaku Gothic ProN", "Meiryo", sans-serif;
+            background-color: #f9f9f9;
+            color: #333;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        h1 {
+            font-size: 24px;
+            text-align: center;
+        }
+        #inputs-container {
+            margin-bottom: 15px;
+        }
+        .input-group {
+            margin-bottom: 10px;
+        }
+        .len-input {
+            width: 80px;
+            padding: 8px;
+            font-size: 16px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            color: #fff;
+            transition: background-color 0.2s;
+        }
+        #add-btn {
+            background-color: #4CAF50;
+        }
+        #add-btn:hover {
+            background-color: #45a049;
+        }
+        #search-btn {
+            background-color: #2196F3;
+        }
+        #search-btn:hover {
+            background-color: #1e88e5;
+        }
+        #results-info {
+            font-weight: bold;
+            margin-bottom: 15px;
+            color: #d32f2f;
+        }
+        .result-item {
+            background: #fff;
+            padding: 15px;
+            margin-bottom: 10px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .base-word {
+            font-size: 18px;
+            font-weight: bold;
+            color: #d32f2f;
+            margin-bottom: 5px;
+        }
+        .sub-words {
+            font-size: 16px;
+            color: #1976d2;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>アナグラム検索ツール</h1>
+    
+    <div id="inputs-container">
+        <div class="input-group">
+            <input type="number" class="len-input" min="1" value="6"> 文字
+        </div>
+        <div class="input-group">
+            <input type="number" class="len-input" min="1" value="5"> 文字
+        </div>
+    </div>
+
+    <div class="controls">
+        <button id="add-btn">文字数を増やす</button>
+        <button id="search-btn">検索する</button>
+    </div>
+
+    <div id="results-info"></div>
+    <div id="results"></div>
+
+    <script>
+        let dictionary = new Map(); // 文字数ごとに単語を分類して保持
+        let isDictLoaded = false;
+
+        // ページ読み込み時に辞書を取得
+        async function loadDictionary() {
+            try {
+                const response = await fetch('kobuta.txt');
+                if (!response.ok) throw new Error('辞書ファイルの読み込みに失敗しました。');
+                
+                const text = await response.text();
+                const words = text.split(/\r?\n/).map(w => w.trim()).filter(w => w !== '');
+                
+                // 文字数ごとにグループ化
+                words.forEach(word => {
+                    const len = word.length;
+                    if (!dictionary.has(len)) {
+                        dictionary.set(len, []);
+                    }
+                    dictionary.get(len).push(word);
+                });
+                isDictLoaded = true;
+            } catch (error) {
+                document.getElementById('results-info').innerText = 'エラー: kobuta.txtが見つからないか、読み込めませんでした。GitHubにアップロードされているか確認してください。';
+                console.error(error);
+            }
+        }
+
+        // 入力欄を増やす処理
+        document.getElementById('add-btn').addEventListener('click', () => {
+            const container = document.getElementById('inputs-container');
+            const div = document.createElement('div');
+            div.className = 'input-group';
+            div.innerHTML = '<input type="number" class="len-input" min="1" value="4"> 文字';
+            container.appendChild(div);
+        });
+
+        // 単語の文字出現回数をカウントするヘルパー関数
+        function getCharCounts(word) {
+            const counts = {};
+            for (let char of word) {
+                counts[char] = (counts[char] || 0) + 1;
+            }
+            return counts;
+        }
+
+        // サブ単語がベース単語から重複なく作れるか判定（アナグラム・部分アナグラム判定）
+        function isSubAnagram(targetWord, baseCounts) {
+            const counts = { ...baseCounts };
+            for (let char of targetWord) {
+                if (!counts[char] || counts[char] <= 0) {
+                    return false;
+                }
+                counts[char]--;
+            }
+            return true;
+        }
+
+        // 配列の配列から直積（すべての組み合わせ）を生成する関数
+        function cartesianProduct(arrays) {
+            return arrays.reduce((acc, curr) => {
+                const res = [];
+                for (let a of acc) {
+                    for (let c of curr) {
+                        res.push([...a, c]);
+                    }
+                }
+                return res;
+            }, [[]]);
+        }
+
+        // 配列をランダムにシャッフルする関数（Fisher-Yates）
+        function shuffleArray(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+            return array;
+        }
+
+        // 検索処理
+        document.getElementById('search-btn').addEventListener('click', async () => {
+            const infoDiv = document.getElementById('results-info');
+            const resultsDiv = document.getElementById('results');
+            infoDiv.innerText = '検索中...';
+            resultsDiv.innerHTML = '';
+
+            if (!isDictLoaded) {
+                await loadDictionary();
+                if (!isDictLoaded) return;
+            }
+
+            // 入力された文字数を取得して数値化し、降順（大きい順）にソート
+            const inputs = Array.from(document.querySelectorAll('.len-input'))
+                                .map(input => parseInt(input.value))
+                                .filter(val => !isNaN(val) && val > 0)
+                                .sort((a, b) => b - a);
+
+            if (inputs.length === 0) {
+                infoDiv.innerText = '文字数を入力してください。';
+                return;
+            }
+
+            const maxLength = inputs[0];
+            const targetLengths = inputs.slice(1);
+            
+            const baseWords = dictionary.get(maxLength) || [];
+            let allCombinations = [];
+
+            // 最大文字数の単語をベースとして探索
+            for (let baseWord of baseWords) {
+                const baseCounts = getCharCounts(baseWord);
+                let isValidBase = true;
+                const matchesForTargetLengths = [];
+
+                // 残りの文字数それぞれについて、作れる単語を探す
+                for (let targetLen of targetLengths) {
+                    const candidateWords = dictionary.get(targetLen) || [];
+                    const validSubWords = candidateWords.filter(targetWord => isSubAnagram(targetWord, baseCounts));
+                    
+                    if (validSubWords.length === 0) {
+                        isValidBase = false;
+                        break; // このベース単語からは作れない文字数があったのでスキップ
+                    }
+                    matchesForTargetLengths.push(validSubWords);
+                }
+
+                // すべての文字数条件を満たす単語が存在した場合、組み合わせを生成
+                if (isValidBase) {
+                    const combinations = cartesianProduct(matchesForTargetLengths);
+                    for (let combo of combinations) {
+                        allCombinations.push({ base: baseWord, subs: combo, lengths: targetLengths });
+                    }
+                }
+            }
+
+            // 結果の表示処理
+            const totalResults = allCombinations.length;
+            if (totalResults === 0) {
+                infoDiv.innerText = '該当する組み合わせが見つかりませんでした。';
+                return;
+            }
+
+            let displayCombinations = allCombinations;
+            if (totalResults > 500) {
+                displayCombinations = shuffleArray(allCombinations).slice(0, 500);
+                infoDiv.innerText = `合計 ${totalResults} 通り見つかりました。ランダムに500通りのみ表示しています。`;
+            } else {
+                infoDiv.innerText = `合計 ${totalResults} 通り見つかりました。`;
+            }
+
+            // HTMLにレンダリング
+            displayCombinations.forEach(combo => {
+                const itemDiv = document.createElement('div');
+                itemDiv.className = 'result-item';
+                
+                const baseDiv = document.createElement('div');
+                baseDiv.className = 'base-word';
+                baseDiv.innerText = `【${maxLength}文字】 ${combo.base}`;
+                
+                const subsDiv = document.createElement('div');
+                subsDiv.className = 'sub-words';
+                const subTexts = combo.subs.map((word, index) => `【${combo.lengths[index]}文字】 ${word}`);
+                subsDiv.innerText = '構成可能: ' + subTexts.join(' / ');
+
+                itemDiv.appendChild(baseDiv);
+                itemDiv.appendChild(subsDiv);
+                resultsDiv.appendChild(itemDiv);
+            });
+        });
+        
+        // 初回ロード
+        loadDictionary();
+    </script>
+</body>
+</html>

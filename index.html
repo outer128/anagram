@@ -108,7 +108,7 @@
         // ページ読み込み時に辞書を取得
         async function loadDictionary() {
             try {
-                const response = await fetch('kobuta.txt');
+                const response = await fetch('kobuta100.txt');
                 if (!response.ok) throw new Error('辞書ファイルの読み込みに失敗しました。');
                 
                 const text = await response.text();
